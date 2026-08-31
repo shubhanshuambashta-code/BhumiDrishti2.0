@@ -1,0 +1,64 @@
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from app.db import get_db
+from app.models import Project
+from app.services.predict import predict_project
+from app.services.shap_service import explain_project_shap
+from app.services.recommendation import recommend_for_project
+from app.api.deps import get_current_user, require_role
+from app.services.audit import write_audit
+from app.services.alerts import create_alert
+
+router = APIRouter()
+
+@router.post('/projects/{project_id}/intervene')
+def intervene(project_id: str, adjustments: dict, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    p = db.query(Project).filter(Project.project_id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail='Project not found')
+    # capture original project state
+    proj_orig = {c.name: getattr(p, c.name) for c in p.__table__.columns}
+    # merge adjustments into a copy
+    proj_mod = proj_orig.copy()
+    proj_mod.update(adjustments)
+
+    before = predict_project(proj_orig)
+    after = predict_project(proj_mod)
+
+    # write audit log
+    try:
+        write_audit(db, username=user.username, action='intervention_simulation', project_id=project_id, old_value=proj_orig, new_value=proj_mod, meta={'before': before, 'after': after})
+    except Exception as e:
+        print('Audit write failed', e)
+
+    # if risk category escalated or de-escalated, create alert
+    try:
+        before_cat = before.get('risk_category')
+        after_cat = after.get('risk_category')
+        if before_cat != after_cat:
+            # severity: escalation -> High, de-escalation -> Info
+            if after_cat in ['HIGH', 'CRITICAL'] and before_cat in ['LOW','MODERATE','HIGH'] and after_cat != before_cat:
+                create_alert(db, project_id, alert_type='risk_change', message=f'Risk changed from {before_cat} to {after_cat}', severity='High', meta={'before': before_cat, 'after': after_cat})
+            else:
+                create_alert(db, project_id, alert_type='risk_change', message=f'Risk changed from {before_cat} to {after_cat}', severity='Info', meta={'before': before_cat, 'after': after_cat})
+    except Exception as e:
+        print('Alert creation failed', e)
+
+    # compute shap for after-case
+    shap_info = explain_project_shap(proj_mod)
+
+    return {'before': before, 'after': after, 'delta_score': before['risk_score'] - after['risk_score'], 'after_shap': shap_info}
+
+@router.get('/projects/{project_id}/recommend')
+def recommend(project_id: str, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    p = db.query(Project).filter(Project.project_id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail='Project not found')
+    proj_dict = {c.name: getattr(p, c.name) for c in p.__table__.columns}
+    recs = recommend_for_project(proj_dict)
+    # write audit log for recommendation view
+    try:
+        write_audit(db, username=user.username, action='view_recommendations', project_id=project_id, old_value={}, new_value={'recommendations': recs})
+    except Exception:
+        pass
+    return {'recommendations': recs}
