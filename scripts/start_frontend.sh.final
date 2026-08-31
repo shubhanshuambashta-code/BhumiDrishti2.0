@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+# frontend dev helper
+cd frontend
+npm install --legacy-peer-deps
+npm run dev
