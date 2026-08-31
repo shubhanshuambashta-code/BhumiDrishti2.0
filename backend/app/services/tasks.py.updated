@@ -100,7 +100,8 @@ def save_attachment(db: Session, username: str, task_id: int, upload_file) -> Ta
     dest = os.path.join(UPLOAD_DIR, filename)
     with open(dest, 'wb') as f:
         f.write(upload_file.file.read())
-    a = TaskAttachment(task_id=task_id, filename=filename, original_name=upload_file.filename, uploaded_by=username, meta={})
+    # mark attachments as permanent in metadata
+    a = TaskAttachment(task_id=task_id, filename=filename, original_name=upload_file.filename, uploaded_by=username, meta={'permanent': True})
     db.add(a)
     db.commit()
     db.refresh(a)
