@@ -1,7 +1,8 @@
-from sqlalchemy import Column, String, Integer, Float, Boolean, Date, Text
+from sqlalchemy import Column, String, Integer, Float, Boolean, Date, Text, DateTime
 from sqlalchemy.dialects.postgresql import JSONB
 from geoalchemy2 import Geometry
 from app.db import Base
+from datetime import datetime
 
 class Project(Base):
     __tablename__ = 'projects'
@@ -65,3 +66,25 @@ class User(Base):
     role = Column(String, default='viewer')
     full_name = Column(String)
     email = Column(String)
+
+class Alert(Base):
+    __tablename__ = 'alerts'
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(String, index=True)
+    alert_type = Column(String)
+    message = Column(Text)
+    severity = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    read = Column(Boolean, default=False)
+    meta = Column(JSONB)
+
+class AuditLog(Base):
+    __tablename__ = 'audit_logs'
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String)
+    action = Column(String)
+    project_id = Column(String)
+    old_value = Column(JSONB)
+    new_value = Column(JSONB)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    meta = Column(JSONB)
