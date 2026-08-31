@@ -57,3 +57,11 @@ class Project(Base):
     actual_delay_days = Column(Integer)
     delayed = Column(Integer, index=True)
     extra = Column(JSONB)
+
+class User(Base):
+    __tablename__ = 'users'
+    username = Column(String, primary_key=True, index=True)
+    hashed_password = Column(String, nullable=False)
+    role = Column(String, default='viewer')
+    full_name = Column(String)
+    email = Column(String)
