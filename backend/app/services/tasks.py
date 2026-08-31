@@ -25,6 +25,7 @@ def update_task_status(db: Session, username: str, task_id: int, status: str):
         return None
     old = {'status': t.status}
     t.status = status
+    t.updated_at = t.updated_at
     db.add(t)
     db.commit()
     db.refresh(t)
@@ -33,3 +34,26 @@ def update_task_status(db: Session, username: str, task_id: int, status: str):
     except Exception:
         pass
     return t
+
+
+def claim_task(db: Session, username: str, task_id: int):
+    t = db.query(Task).filter(Task.id == task_id).first()
+    if not t:
+        return None
+    old = {'assigned_user': t.assigned_user, 'status': t.status}
+    t.assigned_user = username
+    t.status = 'In Progress'
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    try:
+        write_audit(db, username=username, action='claim_task', project_id=t.project_id, old_value=old, new_value={'assigned_user': username, 'status': t.status})
+    except Exception:
+        pass
+    return t
+
+
+def tasks_for_inbox(db: Session, username: str, role: str):
+    # tasks assigned to the user or to the user's role
+    q = db.query(Task).filter((Task.assigned_user == username) | (Task.assigned_role == role)).order_by(Task.created_at.desc())
+    return q.all()

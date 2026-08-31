@@ -1,0 +1,19 @@
+from app.api.routes import projects
+from app.api.routes import auth as auth_routes
+from app.api.routes import interventions
+from app.api.routes import alerts as alerts_routes
+from app.api.routes import audit as audit_routes
+from app.api.routes import map as map_routes
+from app.api.routes import shap_visuals
+from app.api.routes import tasks as tasks_routes
+from app.api.routes import users as users_routes
+
+app.include_router(auth_routes.router, prefix="/api/auth")
+app.include_router(projects.router, prefix="/api")
+app.include_router(interventions.router, prefix="/api")
+app.include_router(alerts_routes.router, prefix="/api/alerts")
+app.include_router(audit_routes.router, prefix="/api/audit-logs")
+app.include_router(map_routes.router, prefix="/api/map")
+app.include_router(shap_visuals.router, prefix="/api")
+app.include_router(tasks_routes.router, prefix="/api")
+app.include_router(users_routes.router, prefix="/api/users")

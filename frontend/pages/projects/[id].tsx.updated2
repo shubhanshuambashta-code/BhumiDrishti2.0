@@ -1,0 +1,134 @@
+import { useRouter } from 'next/router'
+import { useEffect, useState } from 'react'
+
+export default function ProjectDetail(){
+  const router = useRouter()
+  const { id } = router.query
+  const [project, setProject] = useState<any>(null)
+  const [enhanced, setEnhanced] = useState<any>(null)
+  const [beforeAfter, setBeforeAfter] = useState<any>(null)
+  const [pendingApprovals, setPendingApprovals] = useState<number>(0)
+  const [compPendingPct, setCompPendingPct] = useState<number>(0)
+  const [possessionPct, setPossessionPct] = useState<number>(0)
+  const [legalDispute, setLegalDispute] = useState<boolean>(false)
+  const [tasks, setTasks] = useState<any[]>([])
+  const [users, setUsers] = useState<any[]>([])
+  const [assignUser, setAssignUser] = useState<string>('')
+
+  useEffect(()=>{
+    if (!id) return
+    const token = localStorage.getItem('token')
+    fetch(`/api/projects/${id}`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>r.json()).then(d=>{
+      setProject(d)
+      setPendingApprovals(d.pending_approvals||0)
+      setCompPendingPct(d.compensation_pending_percentage||0)
+      setPossessionPct(d.possession_percentage||0)
+      setLegalDispute((d.legal_disputes||0)>0)
+    })
+    fetch(`/api/projects/${id}/explain-enhanced`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>r.json()).then(d=>setEnhanced(d))
+    fetch(`/api/projects/${id}/tasks`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>r.json()).then(d=>setTasks(d.tasks||[]))
+    // try to fetch users (only allowed for superadmin)
+    fetch(`/api/users/`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>{ if (r.ok) return r.json(); return []; }).then(d=>setUsers(d||[]))
+  },[id])
+
+  const runIntervention = async () =>{
+    const token = localStorage.getItem('token')
+    const adjustments = {pending_approvals: pendingApprovals, compensation_pending_percentage: compPendingPct, possession_percentage: possessionPct, legal_disputes: legalDispute?1:0}
+    const res = await fetch(`/api/projects/${id}/intervene`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify(adjustments)})
+    const data = await res.json()
+    setBeforeAfter(data)
+  }
+
+  const createTask = async (title:string, assignUserOverride?:string) =>{
+    const token = localStorage.getItem('token')
+    const body:any = {title, description: title, assigned_role: 'project_officer'}
+    if (assignUserOverride) body.assigned_user = assignUserOverride
+    const res = await fetch(`/api/projects/${id}/tasks`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify(body)})
+    const data = await res.json()
+    // reload tasks
+    const tres = await fetch(`/api/projects/${id}/tasks`, {headers:{'Authorization': `Bearer ${token}`}})
+    const td = await tres.json()
+    setTasks(td.tasks||[])
+  }
+
+  if (!project) return <div>Loading...</div>
+  return (
+    <div style={{padding:20}}>
+      <h1>{project.project_name}</h1>
+      <div>District: {project.district} | State: {project.state}</div>
+      <div>Type: {project.project_type}</div>
+
+      <h3>Intervention Simulator</h3>
+      <div style={{display:'flex', gap:12}}>
+        <div>
+          <label>Pending approvals: {pendingApprovals}</label>
+          <input type="range" min={0} max={10} value={pendingApprovals} onChange={e=>setPendingApprovals(parseInt(e.target.value))} />
+        </div>
+        <div>
+          <label>Compensation pending %: {compPendingPct}</label>
+          <input type="range" min={0} max={100} value={compPendingPct} onChange={e=>setCompPendingPct(parseInt(e.target.value))} />
+        </div>
+        <div>
+          <label>Possession %: {possessionPct}</label>
+          <input type="range" min={0} max={100} value={possessionPct} onChange={e=>setPossessionPct(parseInt(e.target.value))} />
+        </div>
+        <div>
+          <label>Legal dispute:</label>
+          <input type="checkbox" checked={legalDispute} onChange={e=>setLegalDispute(e.target.checked)} />
+        </div>
+      </div>
+      <button onClick={runIntervention}>Run Simulation</button>
+
+      {beforeAfter && (
+        <div>
+          <h4>Before</h4>
+          <pre>{JSON.stringify(beforeAfter.before, null, 2)}</pre>
+          <h4>After</h4>
+          <pre>{JSON.stringify(beforeAfter.after, null, 2)}</pre>
+          <div>Delta score: {beforeAfter.delta_score}</div>
+        </div>
+      )}
+
+      <h3>SHAP Explanation</h3>
+      {enhanced && (
+        <div>
+          <img src={enhanced.chart_base64} alt="SHAP chart" style={{maxWidth:'100%', border:'1px solid #ddd'}} />
+          <h4>Top Contributors</h4>
+          <div style={{display:'flex',gap:12}}>
+            <div>
+              <h5>Positive (increase risk)</h5>
+              <ul>
+                {(enhanced.top_positive_contributors||[]).map((c:any,i:number)=>(<li key={i}>{c.feature}: {c.contribution.toFixed(3)}</li>))}
+              </ul>
+            </div>
+            <div>
+              <h5>Negative (protective)</h5>
+              <ul>
+                {(enhanced.top_negative_contributors||[]).map((c:any,i:number)=>(<li key={i}>{c.feature}: {c.contribution.toFixed(3)}</li>))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <h3>Tasks</h3>
+      <div style={{marginBottom:8}}>
+        <label>Assign to user (superadmin only):</label>
+        <select onChange={e=>setAssignUser(e.target.value)} value={assignUser}>
+          <option value="">-- none --</option>
+          {users.map(u=> (<option key={u.username} value={u.username}>{u.username} ({u.role})</option>))}
+        </select>
+        <button onClick={()=>createTask('Resolve pending approvals', assignUser)}>Create Task: Resolve pending approvals</button>
+      </div>
+      <div>
+        {tasks.map(t=> (
+          <div key={t.id} style={{border:'1px solid #eee', padding:8, margin:8}}>
+            <div><strong>{t.title}</strong> [{t.status}]</div>
+            <div>Assigned: {t.assigned_user || t.assigned_role} | Due: {t.due_date}</div>
+          </div>
+        ))}
+      </div>
+
+    </div>
+  )
+}
