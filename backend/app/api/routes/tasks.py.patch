@@ -1,0 +1,19 @@
+@@
+ @router.post('/tasks/{task_id}/claim')
+ def api_claim_task(task_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
+     t = claim_task(db, username=user.username, task_id=task_id)
+     if not t:
+         raise HTTPException(status_code=404, detail='Task not found')
+     return {'task': {'id': t.id, 'assigned_user': t.assigned_user, 'status': t.status}}
++
++@router.post('/tasks/{task_id}/reassign')
++def api_reassign_task(task_id: int, payload: dict, db: Session = Depends(get_db), user = Depends(get_current_user)):
++    assigned_role = payload.get('assigned_role')
++    assigned_user = payload.get('assigned_user')
++    if not assigned_role and not assigned_user:
++        raise HTTPException(status_code=400, detail='assigned_role or assigned_user required')
++    from app.services.tasks import reassign_task
++    t = reassign_task(db, username=user.username, task_id=task_id, assigned_role=assigned_role, assigned_user=assigned_user)
++    if not t:
++        raise HTTPException(status_code=404, detail='Task not found')
++    return {'task': {'id': t.id, 'assigned_role': t.assigned_role, 'assigned_user': t.assigned_user}}
