@@ -77,6 +77,8 @@ class Alert(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     read = Column(Boolean, default=False)
     meta = Column(JSONB)
+    assigned_role = Column(String, nullable=True)
+    assigned_user = Column(String, nullable=True)
 
 class AuditLog(Base):
     __tablename__ = 'audit_logs'
@@ -87,4 +89,19 @@ class AuditLog(Base):
     old_value = Column(JSONB)
     new_value = Column(JSONB)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    meta = Column(JSONB)
+
+class Task(Base):
+    __tablename__ = 'tasks'
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(String, index=True)
+    title = Column(String)
+    description = Column(Text)
+    assigned_role = Column(String, nullable=True)
+    assigned_user = Column(String, nullable=True)
+    priority = Column(String, default='Medium')
+    due_date = Column(String, nullable=True)
+    status = Column(String, default='Open')
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
     meta = Column(JSONB)

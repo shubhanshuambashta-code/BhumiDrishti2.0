@@ -1,0 +1,58 @@
+import { useEffect, useState } from 'react'
+
+export default function Alerts(){
+  const [alerts, setAlerts] = useState<any[]>([])
+  const [filterRole, setFilterRole] = useState<string>('')
+
+  useEffect(()=>{
+    loadAlerts()
+  },[])
+
+  const loadAlerts = async (role?:string) =>{
+    const token = localStorage.getItem('token')
+    const q = role?`?assigned_to=${role}`:''
+    const res = await fetch(`/api/alerts${q}`, {headers: {'Authorization': `Bearer ${token}`}})
+    const data = await res.json()
+    setAlerts(data.rows || [])
+  }
+
+  const ack = async (id:number) =>{
+    const token = localStorage.getItem('token')
+    await fetch(`/api/alerts/${id}/ack`, {method:'POST', headers:{'Authorization': `Bearer ${token}`}})
+    loadAlerts(filterRole)
+  }
+
+  const assignRole = async (id:number, role:string) =>{
+    const token = localStorage.getItem('token')
+    await fetch(`/api/alerts/${id}/assign`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify({assigned_role: role})})
+    loadAlerts(filterRole)
+  }
+
+  return (
+    <div style={{padding:20}}>
+      <h2>Alerts</h2>
+      <div style={{marginBottom:12}}>
+        <label>Filter by role:</label>
+        <select onChange={e=>{ setFilterRole(e.target.value); loadAlerts(e.target.value) }} value={filterRole}>
+          <option value="">All</option>
+          <option value="superadmin">Super Admin</option>
+          <option value="state_admin">State Admin</option>
+          <option value="district_admin">District Admin</option>
+          <option value="project_officer">Project Officer</option>
+          <option value="viewer">Viewer</option>
+        </select>
+      </div>
+
+      {alerts.map(a=> (
+        <div key={a.id} style={{border:'1px solid #ddd', padding:8, margin:8}}>
+          <div><strong>{a.alert_type}</strong> [{a.severity}]</div>
+          <div>{a.message}</div>
+          <div>{a.created_at}</div>
+          <div>Assigned: {a.assigned_role || a.assigned_user || 'Unassigned'}</div>
+          {!a.read && <button onClick={()=>ack(a.id)}>Acknowledge</button>}
+          {!a.assigned_role && <button onClick={()=>assignRole(a.id,'project_officer')}>Assign to Project Officer</button>}
+        </div>
+      ))}
+    </div>
+  )
+}
