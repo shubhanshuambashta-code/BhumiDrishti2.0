@@ -1,0 +1,5 @@
+/* globals */
+.marker { display: block; }
+.heat-marker { display:block; opacity:0.85; }
+.cluster-marker { font-weight: 600; }
+.project-marker { box-shadow: 0 0 6px rgba(0,0,0,0.2); }
