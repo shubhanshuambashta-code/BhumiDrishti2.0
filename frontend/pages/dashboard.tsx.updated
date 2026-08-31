@@ -1,33 +1,80 @@
-import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 export default function Dashboard(){
   const [projects, setProjects] = useState<any[]>([])
+  const [stats, setStats] = useState<any>(null)
 
   useEffect(()=>{
     const token = localStorage.getItem('token')
     fetch('/api/projects?limit=20', {headers: {'Authorization': `Bearer ${token}`}})
       .then(r=>r.json()).then(d=>setProjects(d.rows || []))
+
+    fetch('/api/stats/dashboard', {headers: {'Authorization': `Bearer ${token}`}})
+      .then(r=>r.json()).then(d=>setStats(d))
   },[])
 
   return (
-    <div style={{padding:20}}>
-      <h1>BHUMIDRISHTI — Dashboard (Demo)</h1>
-      <div style={{marginBottom:12}}>
-        <Link href="/map"><a style={{marginRight:12}}>Risk Map</a></Link>
-        <Link href="/alerts"><a style={{marginRight:12}}>Alerts</a></Link>
-        <Link href="/audit"><a>Audit Logs</a></Link>
-      </div>
-      <div>
-        {projects.map(p=> (
-          <div key={p.project_id} style={{border:'1px solid #ccc', padding:10, margin:8}}>
-            <h3>{p.project_name}</h3>
-            <div>District: {p.district} | Type: {p.project_type}</div>
-            <div>Delayed: {p.delayed ? 'Yes' : 'No'}</div>
-            <Link href={`/projects/${p.project_id}`}><a>Open</a></Link>
+    <div className="container">
+      <header className="flex items-center justify-between py-6">
+        <h1 className="text-2xl font-semibold">BHUMIDRISHTI — Dashboard (Demo)</h1>
+        <nav className="space-x-4">
+          <Link href="/map"><a className="text-indigo-600">Risk Map</a></Link>
+          <Link href="/alerts"><a className="text-indigo-600">Alerts</a></Link>
+          <Link href="/tasks"><a className="text-indigo-600">Tasks</a></Link>
+        </nav>
+      </header>
+
+      <section className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="card">
+          <div className="text-sm text-gray-500">Total Projects</div>
+          <div className="text-2xl font-bold">{stats ? stats.total_projects : '—'}</div>
+        </div>
+        <div className="card">
+          <div className="text-sm text-gray-500">Projects Delayed</div>
+          <div className="text-2xl font-bold">{stats ? stats.projects_delayed_count : '—'}</div>
+        </div>
+        <div className="card">
+          <div className="text-sm text-gray-500">High-Risk (proxy)</div>
+          <div className="text-2xl font-bold">{stats ? stats.high_risk_count : '—'}</div>
+        </div>
+        <div className="card">
+          <div className="text-sm text-gray-500">Avg Previous Delay Rate</div>
+          <div className="text-2xl font-bold">{stats ? (stats.avg_prev_delay_rate||0).toFixed(2) : '—'}</div>
+        </div>
+      </section>
+
+      <section className="card mb-6">
+        <h2 className="text-lg font-medium mb-4">Risk distribution (sample)</h2>
+        {projects.length>0 ? (
+          <div style={{width:'100%', height:240}}>
+            <ResponsiveContainer>
+              <BarChart data={projects.map(p=>({name: p.project_id, delayed: p.delayed?1:0}))}>
+                <XAxis dataKey="name" hide />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="delayed" fill="#ef4444" />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-        ))}
-      </div>
+        ) : <div>Loading chart...</div>}
+      </section>
+
+      <section>
+        <h2 className="text-lg font-medium mb-2">Recent projects</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {projects.map(p=> (
+            <div key={p.project_id} className="card">
+              <h3 className="font-semibold">{p.project_name}</h3>
+              <div className="text-sm text-gray-600">{p.district} | {p.project_type}</div>
+              <div className="mt-2">Delayed: {p.delayed ? 'Yes' : 'No'}</div>
+              <Link href={`/projects/${p.project_id}`}><a className="text-indigo-600 mt-2 block">Open</a></Link>
+            </div>
+          ))}
+        </div>
+      </section>
+
     </div>
   )
 }
