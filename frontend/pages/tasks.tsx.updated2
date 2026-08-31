@@ -1,0 +1,82 @@
+import { useEffect, useState } from 'react'
+import { toast } from 'react-toastify'
+
+export default function TasksInbox(){
+  const [tasks, setTasks] = useState<any[]>([])
+  const [users, setUsers] = useState<any[]>([])
+  const [reassignRole, setReassignRole] = useState<string>('')
+  const [reassignUser, setReassignUser] = useState<string>('')
+
+  useEffect(()=>{ load(); fetchUsers() },[])
+
+  const load = async () =>{
+    const token = localStorage.getItem('token')
+    const res = await fetch('/api/tasks/inbox', {headers:{'Authorization': `Bearer ${token}`}})
+    const data = await res.json()
+    setTasks(data.tasks||[])
+  }
+
+  const fetchUsers = async ()=>{
+    const token = localStorage.getItem('token')
+    const res = await fetch('/api/users/', {headers:{'Authorization': `Bearer ${token}`}})
+    if (res.ok){
+      const d = await res.json()
+      setUsers(d)
+    }
+  }
+
+  const claim = async (id:number) =>{
+    const token = localStorage.getItem('token')
+    await fetch(`/api/tasks/${id}/claim`, {method:'POST', headers:{'Authorization': `Bearer ${token}`}})
+    toast.success('Task claimed')
+    load()
+  }
+
+  const reassign = async (id:number) =>{
+    if (!reassignRole && !reassignUser){ toast.error('Choose role or user'); return }
+    const token = localStorage.getItem('token')
+    const payload:any = {}
+    if (reassignRole) payload.assigned_role = reassignRole
+    if (reassignUser) payload.assigned_user = reassignUser
+    const res = await fetch(`/api/tasks/${id}/reassign`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify(payload)})
+    if (res.ok){ toast.success('Task reassigned'); load() } else { toast.error('Reassign failed') }
+  }
+
+  const closeTask = async (id:number) =>{
+    const token = localStorage.getItem('token')
+    const res = await fetch(`/api/tasks/${id}/status`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify({status: 'Closed'})})
+    if (res.ok){ toast.success('Task closed'); load() } else { toast.error('Close failed') }
+  }
+
+  return (
+    <div style={{padding:20}}>
+      <h2>Task Inbox</h2>
+      <div style={{marginBottom:12}}>
+        <label>Reassign role:</label>
+        <select onChange={e=>setReassignRole(e.target.value)} value={reassignRole}>
+          <option value="">-- none --</option>
+          <option value="project_officer">project_officer</option>
+          <option value="district_officer">district_officer</option>
+          <option value="state_admin">state_admin</option>
+          <option value="superadmin">superadmin</option>
+        </select>
+        <label style={{marginLeft:8}}>Or user:</label>
+        <select onChange={e=>setReassignUser(e.target.value)} value={reassignUser}>
+          <option value="">-- none --</option>
+          {users.map(u=> (<option key={u.username} value={u.username}>{u.username} ({u.role})</option>))}
+      </select>
+      </div>
+
+      {tasks.map(t=> (
+        <div key={t.id} style={{border:'1px solid #ddd', padding:8, margin:8}}>
+          <div><strong>{t.title}</strong> [{t.status}]</div>
+          <div>Project: {t.project_id}</div>
+          <div>Assigned: {t.assigned_role || t.assigned_user}</div>
+          {t.assigned_user===null && ( <button onClick={()=>claim(t.id)}>Claim task</button> )}
+          <button onClick={()=>reassign(t.id)}>Reassign</button>
+          <button onClick={()=>closeTask(t.id)}>Close</button>
+        </div>
+      ))}
+    </div>
+  )
+}
