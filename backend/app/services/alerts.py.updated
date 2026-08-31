@@ -1,0 +1,31 @@
+from sqlalchemy.orm import Session
+from app.models import Alert, User
+from datetime import datetime
+from app.services.email_service import send_email
+
+
+def create_alert(db: Session, project_id: str, alert_type: str, message: str, severity: str = 'High', meta: dict = None, assigned_role: str = None, assigned_user: str = None, notify: bool = True):
+    a = Alert(project_id=project_id, alert_type=alert_type, message=message, severity=severity, created_at=datetime.utcnow(), read=False, meta=meta or {}, assigned_role=assigned_role, assigned_user=assigned_user)
+    db.add(a)
+    db.commit()
+    db.refresh(a)
+
+    # Demo email notification
+    if notify:
+        try:
+            recipient = None
+            if assigned_user:
+                u = db.query(User).filter(User.username == assigned_user).first()
+                if u and u.email:
+                    recipient = u.email
+            if not recipient and assigned_role:
+                # demo role alias
+                recipient = f"{assigned_role}@example.local"
+            if recipient:
+                subject = f"[BHUMIDRISHTI] Alert: {alert_type} for project {project_id}"
+                body = f"Alert: {message}\nSeverity: {severity}\nProject: {project_id}\nMeta: {meta or {}}"
+                send_email(recipient, subject, body, meta={'alert_id': a.id, 'assigned_role': assigned_role, 'assigned_user': assigned_user})
+        except Exception:
+            pass
+
+    return a
