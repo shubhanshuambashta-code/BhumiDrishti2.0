@@ -8,6 +8,13 @@ FEATURES = ['land_issues', 'pending_approvals', 'compensation_pending', 'possess
 _CACHE: Dict[str, Dict] = {}
 CACHE_TTL = 3600  # seconds (1 hour)
 
+def invalidate_explain_cache(project_id: str) -> bool:
+    """Invalidate the cached explanation for a project. Returns True if an entry was removed."""
+    if project_id in _CACHE:
+        del _CACHE[project_id]
+        return True
+    return False
+
 
 def _deterministic_scores(project_id: str):
     seed = sum(ord(c) for c in str(project_id))
