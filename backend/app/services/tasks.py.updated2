@@ -1,0 +1,153 @@
+import os
+from sqlalchemy.orm import Session
+from app.models import Task
+from app.services.audit import write_audit
+from app.models_extras import TaskComment, TaskAttachment
+from app.services.explain import invalidate_explain_cache
+
+UPLOAD_DIR = os.path.join(os.getcwd(), 'uploads')
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def create_task(db: Session, username: str, project_id: str, title: str, description: str, assigned_role: str = None, assigned_user: str = None, priority: str = 'Medium', due_date: str = None, meta: dict = None):
+    t = Task(project_id=project_id, title=title, description=description, assigned_role=assigned_role, assigned_user=assigned_user, priority=priority, due_date=due_date, status='Open', meta=meta or {})
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    try:
+        write_audit(db, username=username, action='create_task', project_id=project_id, old_value={}, new_value={'task_id': t.id, 'title': title, 'assigned': assigned_user or assigned_role})
+    except Exception:
+        pass
+    # Invalidate explanation cache for this project so SHAP visuals reflect the new task
+    try:
+        invalidate_explain_cache(project_id)
+    except Exception:
+        pass
+    return t
+
+
+def list_tasks(db: Session, project_id: str):
+    return db.query(Task).filter(Task.project_id == project_id).order_by(Task.created_at.desc()).all()
+
+
+def update_task_status(db: Session, username: str, task_id: int, status: str):
+    t = db.query(Task).filter(Task.id == task_id).first()
+    if not t:
+        return None
+    old = {'status': t.status}
+    t.status = status
+    t.updated_at = t.updated_at
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    try:
+        write_audit(db, username=username, action='update_task', project_id=t.project_id, old_value=old, new_value={'status': status})
+    except Exception:
+        pass
+    # invalidate explanation cache for the project
+    try:
+        invalidate_explain_cache(t.project_id)
+    except Exception:
+        pass
+    return t
+
+
+def claim_task(db: Session, username: str, task_id: int):
+    t = db.query(Task).filter(Task.id == task_id).first()
+    if not t:
+        return None
+    old = {'assigned_user': t.assigned_user, 'status': t.status}
+    t.assigned_user = username
+    t.status = 'In Progress'
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    try:
+        write_audit(db, username=username, action='claim_task', project_id=t.project_id, old_value=old, new_value={'assigned_user': username, 'status': t.status})
+    except Exception:
+        pass
+    # Invalidate explanation cache because task assignment/status changed
+    try:
+        invalidate_explain_cache(t.project_id)
+    except Exception:
+        pass
+    return t
+
+
+def tasks_for_inbox(db: Session, username: str, role: str):
+    q = db.query(Task).filter((Task.assigned_user == username) | (Task.assigned_role == role)).order_by(Task.created_at.desc())
+    return q.all()
+
+# Comments & attachments
+
+def add_comment(db: Session, username: str, task_id: int, comment: str, parent_id: int = None):
+    c = TaskComment(task_id=task_id, username=username, comment=comment, parent_id=parent_id)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    try:
+        write_audit(db, username=username, action='add_comment', project_id=None, old_value={}, new_value={'task_id': task_id, 'comment_id': c.id, 'parent_id': parent_id})
+    except Exception:
+        pass
+    # Invalidate explanation cache for the related project (if available)
+    try:
+        t = db.query(Task).filter(Task.id == task_id).first()
+        if t:
+            invalidate_explain_cache(t.project_id)
+    except Exception:
+        pass
+    return c
+
+
+def list_comments(db: Session, task_id: int):
+    rows = db.query(TaskComment).filter(TaskComment.task_id == task_id).order_by(TaskComment.created_at.asc()).all()
+    # build nested structure
+    by_id = {}
+    roots = []
+    for r in rows:
+        node = {'id': r.id, 'comment': r.comment, 'username': r.username, 'created_at': r.created_at.isoformat(), 'parent_id': r.parent_id, 'children': []}
+        by_id[r.id] = node
+    for r in rows:
+        node = by_id[r.id]
+        if r.parent_id and r.parent_id in by_id:
+            by_id[r.parent_id]['children'].append(node)
+        else:
+            roots.append(node)
+    return roots
+
+
+def save_attachment(db: Session, username: str, task_id: int, upload_file) -> TaskAttachment:
+    # upload_file is Starlette UploadFile
+    filename = f"task_{task_id}_{int(__import__('time').time())}_{upload_file.filename}"
+    dest = os.path.join(UPLOAD_DIR, filename)
+    with open(dest, 'wb') as f:
+        f.write(upload_file.file.read())
+    # mark attachments as permanent in metadata
+    a = TaskAttachment(task_id=task_id, filename=filename, original_name=upload_file.filename, uploaded_by=username, meta={'permanent': True})
+    db.add(a)
+    db.commit()
+    db.refresh(a)
+    try:
+        write_audit(db, username=username, action='add_attachment', project_id=None, old_value={}, new_value={'task_id': task_id, 'attachment_id': a.id, 'filename': filename})
+    except Exception:
+        pass
+    # invalidate explanation cache for this project's visuals
+    try:
+        t = db.query(Task).filter(Task.id == task_id).first()
+        if t:
+            invalidate_explain_cache(t.project_id)
+    except Exception:
+        pass
+    return a
+
+
+def list_attachments(db: Session, task_id: int):
+    return db.query(TaskAttachment).filter(TaskAttachment.task_id == task_id).order_by(TaskAttachment.uploaded_at.desc()).all()
+
+
+def get_attachment_path(filename: str):
+    p = os.path.join(UPLOAD_DIR, filename)
+    if os.path.exists(p):
+        return p
+    return None

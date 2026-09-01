@@ -1,0 +1,162 @@
+import { useRouter } from 'next/router'
+import { useEffect, useState } from 'react'
+import { toast } from 'react-toastify'
+
+function CommentNode({ node, onReply }: any){
+  const [collapsed, setCollapsed] = useState(false)
+  const hasManyChildren = node.children && node.children.length > 3
+
+  return (
+    <div style={{marginLeft: node.parent_id?20:0, borderLeft: node.parent_id? '1px solid #eee' : 'none', paddingLeft:8, marginTop:8}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+        <div>
+          <div style={{fontSize:12, color:'#333'}}><strong>{node.username}</strong> <span style={{color:'#888', fontSize:11}}>{new Date(node.created_at).toLocaleString()}</span></div>
+          <div style={{marginTop:4}}>{node.comment}</div>
+        </div>
+        <div style={{marginLeft:12}}>
+          <button onClick={()=>onReply(node.id)} style={{fontSize:12, marginRight:8}}>Reply</button>
+          {hasManyChildren && (
+            <button onClick={()=>setCollapsed(c=>!c)} style={{fontSize:12}}>{collapsed? 'Expand thread' : 'Collapse thread'}</button>
+          )}
+        </div>
+      </div>
+      {!collapsed && node.children && node.children.length>0 && (
+        <div style={{marginTop:8}}>
+          {node.children.map((c:any)=> <CommentNode key={c.id} node={c} onReply={onReply} />)}
+        </div>
+      )}
+      {collapsed && node.children && node.children.length>0 && (
+        <div style={{marginTop:8, fontSize:12, color:'#666'}}>Thread collapsed ({node.children.length} replies) — click "Expand thread" to view</div>
+      )}
+    </div>
+  )
+}
+
+export default function ProjectDetail(){
+  const router = useRouter()
+  const { id } = router.query
+  const [project, setProject] = useState<any>(null)
+  const [tasks, setTasks] = useState<any[]>([])
+  const [users, setUsers] = useState<any[]>([])
+  const [commentText, setCommentText] = useState<string>('')
+  const [selectedFile, setSelectedFile] = useState<any>(null)
+  const [commentsByTask, setCommentsByTask] = useState<any>({})
+  const [attachmentsByTask, setAttachmentsByTask] = useState<any>({})
+  const [replyTo, setReplyTo] = useState<any>({})
+
+  useEffect(()=>{
+    if (!id) return
+    const token = localStorage.getItem('token')
+    fetch(`/api/projects/${id}`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>r.json()).then(d=>{
+      setProject(d)
+    })
+    fetch(`/api/projects/${id}/tasks`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>r.json()).then(d=>setTasks(d.tasks||[]))
+    fetch(`/api/users/`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>{ if (r.ok) return r.json(); return []; }).then(d=>setUsers(d||[]))
+  },[id])
+
+  const loadComments = async (taskId:number) =>{
+    const token = localStorage.getItem('token')
+    const res = await fetch(`/api/tasks/${taskId}/comments`, {headers:{'Authorization': `Bearer ${token}`}})
+    const d = await res.json()
+    setCommentsByTask((s:any)=> ({...s, [taskId]: d.comments || []}))
+  }
+
+  const loadAttachments = async (taskId:number) =>{
+    const token = localStorage.getItem('token')
+    const res = await fetch(`/api/tasks/${taskId}/attachments`, {headers:{'Authorization': `Bearer ${token}`}})
+    const d = await res.json()
+    setAttachmentsByTask((s:any)=> ({...s, [taskId]: d.attachments || []}))
+  }
+
+  const submitComment = async (taskId:number) =>{
+    if (!commentText) return
+    const token = localStorage.getItem('token')
+    const payload:any = {comment: commentText}
+    if (replyTo[taskId]) payload.parent_id = replyTo[taskId]
+    const res = await fetch(`/api/tasks/${taskId}/comment`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify(payload)})
+    if (res.ok){
+      toast.success('Comment added')
+      setCommentText('')
+      setReplyTo((s:any)=> ({...s, [taskId]: null}))
+      loadComments(taskId)
+    } else {
+      toast.error('Failed to add comment')
+    }
+  }
+
+  const uploadAttachment = async (taskId:number) =>{
+    if (!selectedFile) return
+    const token = localStorage.getItem('token')
+    const form = new FormData()
+    form.append('file', selectedFile)
+    const res = await fetch(`/api/tasks/${taskId}/attachments`, {method: 'POST', headers: {'Authorization': `Bearer ${token}`}, body: form})
+    if (res.ok){
+      toast.success('Attachment uploaded')
+      loadAttachments(taskId)
+    } else {
+      toast.error('Upload failed')
+    }
+  }
+
+  if (!project) return <div>Loading...</div>
+  return (
+    <div style={{padding:20}}>
+      <h1>{project.project_name}</h1>
+
+      <h3>Tasks</h3>
+      <div>
+        {tasks.map(t=> (
+          <div key={t.id} style={{border:'1px solid #eee', padding:8, margin:8}}>
+            <div><strong>{t.title}</strong> [{t.status}]</div>
+            <div>Assigned: {t.assigned_user || t.assigned_role} | Due: {t.due_date}</div>
+
+            <div style={{marginTop:8}}>
+              <h5>Attachments</h5>
+              <div>
+                <button onClick={()=>loadAttachments(t.id)}>Load attachments</button>
+                <div style={{display:'flex', gap:8, marginTop:8}}>
+                  {(attachmentsByTask[t.id]||[]).map((a:any)=>{
+                    const ext = (a.original_name || '').split('.').pop()?.toLowerCase() || ''
+                    const isImage = ['png','jpg','jpeg','gif'].includes(ext)
+                    if (isImage){
+                      return (<div key={a.id} style={{width:120}}>
+                        <img src={`/api/tasks/attachments/${a.filename}`} alt={a.original_name} style={{width:'100%', border:'1px solid #ddd'}} />
+                        <div style={{fontSize:12}}>{a.original_name}</div>
+                      </div>)
+                    }
+                    return (<div key={a.id} style={{width:200}}>
+                      <div style={{fontSize:12}}>{a.original_name}</div>
+                      <a href={`/api/tasks/attachments/${a.filename}`} target="_blank" rel="noreferrer">Download</a>
+                    </div>)
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div style={{marginTop:8}}>
+              <h5>Comments</h5>
+              <div>
+                <button onClick={()=>loadComments(t.id)}>Show comments</button>
+                <div style={{marginTop:8}}>
+                  {(commentsByTask[t.id]||[]).map((c:any)=> <CommentNode key={c.id} node={c} onReply={(cid:number)=>setReplyTo((s:any)=>({...s, [t.id]: cid}))} />)}
+                </div>
+
+                <div style={{marginTop:8}}>
+                  {replyTo[t.id] && <div style={{fontSize:12, color:'#666'}}>Replying to comment #{replyTo[t.id]} <button onClick={()=>setReplyTo((s:any)=>({...s, [t.id]: null}))}>Cancel</button></div>}
+                  <textarea value={commentText} onChange={e=>setCommentText(e.target.value)} placeholder="Write a comment..." style={{width:'100%', minHeight:60}} />
+                  <div style={{display:'flex', gap:8, marginTop:8}}>
+                    <input type="file" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} />
+                    <button onClick={()=>submitComment(t.id)}>Add comment</button>
+                    <button onClick={()=>uploadAttachment(t.id)}>Upload attachment</button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}

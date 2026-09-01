@@ -1,0 +1,245 @@
+import { useRouter } from 'next/router'
+import { useEffect, useState } from 'react'
+import { toast } from 'react-toastify'
+
+export default function ProjectDetail(){
+  const router = useRouter()
+  const { id } = router.query
+  const [project, setProject] = useState<any>(null)
+  const [enhanced, setEnhanced] = useState<any>(null)
+  const [beforeAfter, setBeforeAfter] = useState<any>(null)
+  const [pendingApprovals, setPendingApprovals] = useState<number>(0)
+  const [compPendingPct, setCompPendingPct] = useState<number>(0)
+  const [possessionPct, setPossessionPct] = useState<number>(0)
+  const [legalDispute, setLegalDispute] = useState<boolean>(false)
+  const [tasks, setTasks] = useState<any[]>([])
+  const [users, setUsers] = useState<any[]>([])
+  const [assignUser, setAssignUser] = useState<string>('')
+  const [commentText, setCommentText] = useState<string>('')
+  const [selectedFile, setSelectedFile] = useState<any>(null)
+  const [reassignTarget, setReassignTarget] = useState<string>('')
+  const [reassignRole, setReassignRole] = useState<string>('')
+
+  useEffect(()=>{
+    if (!id) return
+    const token = localStorage.getItem('token')
+    fetch(`/api/projects/${id}`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>r.json()).then(d=>{
+      setProject(d)
+      setPendingApprovals(d.pending_approvals||0)
+      setCompPendingPct(d.compensation_pending_percentage||0)
+      setPossessionPct(d.possession_percentage||0)
+      setLegalDispute((d.legal_disputes||0)>0)
+    })
+    fetch(`/api/projects/${id}/explain-enhanced`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>r.json()).then(d=>setEnhanced(d))
+    fetch(`/api/projects/${id}/tasks`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>r.json()).then(d=>setTasks(d.tasks||[]))
+    // try to fetch users (only allowed for superadmin)
+    fetch(`/api/users/`, {headers:{'Authorization': `Bearer ${token}`}}).then(r=>{ if (r.ok) return r.json(); return []; }).then(d=>setUsers(d||[]))
+  },[id])
+
+  const runIntervention = async () =>{
+    const token = localStorage.getItem('token')
+    const adjustments = {pending_approvals: pendingApprovals, compensation_pending_percentage: compPendingPct, possession_percentage: possessionPct, legal_disputes: legalDispute?1:0}
+    const res = await fetch(`/api/projects/${id}/intervene`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify(adjustments)})
+    const data = await res.json()
+    setBeforeAfter(data)
+  }
+
+  const createTask = async (title:string, assignUserOverride?:string) =>{
+    const token = localStorage.getItem('token')
+    const body:any = {title, description: title, assigned_role: 'project_officer'}
+    if (assignUserOverride) body.assigned_user = assignUserOverride
+    const res = await fetch(`/api/projects/${id}/tasks`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify(body)})
+    const data = await res.json()
+    toast.success('Task created')
+    // reload tasks
+    const tres = await fetch(`/api/projects/${id}/tasks`, {headers:{'Authorization': `Bearer ${token}`}})
+    const td = await tres.json()
+    setTasks(td.tasks||[])
+  }
+
+  const addComment = async (taskId:number) =>{
+    if (!commentText) return
+    const token = localStorage.getItem('token')
+    await fetch(`/api/tasks/${taskId}/comment`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify({comment: commentText})})
+    setCommentText('')
+    toast.success('Comment added')
+    // reload tasks/comments (simple reload tasks)
+    const tres = await fetch(`/api/projects/${id}/tasks`, {headers:{'Authorization': `Bearer ${token}`}})
+    const td = await tres.json()
+    setTasks(td.tasks||[])
+  }
+
+  const uploadAttachment = async (taskId:number) =>{
+    if (!selectedFile) return
+    const token = localStorage.getItem('token')
+    const form = new FormData()
+    form.append('file', selectedFile)
+    const res = await fetch(`/api/tasks/${taskId}/attachments`, {method: 'POST', headers: {'Authorization': `Bearer ${token}`}, body: form})
+    const data = await res.json()
+    toast.success('Attachment uploaded')
+    // reload tasks
+  }
+
+  const claimTask = async (taskId:number) =>{
+    const token = localStorage.getItem('token')
+    const res = await fetch(`/api/tasks/${taskId}/claim`, {method:'POST', headers:{'Authorization': `Bearer ${token}`}})
+    if (res.ok){
+      toast.success('Task claimed')
+      const tres = await fetch(`/api/projects/${id}/tasks`, {headers:{'Authorization': `Bearer ${token}`}})
+      const td = await tres.json()
+      setTasks(td.tasks||[])
+    }
+  }
+
+  const reassignTask = async (taskId:number) =>{
+    if (!reassignRole && !reassignTarget) { toast.error('Choose role or user to reassign'); return }
+    const token = localStorage.getItem('token')
+    const payload:any = {}
+    if (reassignRole) payload.assigned_role = reassignRole
+    if (reassignTarget) payload.assigned_user = reassignTarget
+    const res = await fetch(`/api/tasks/${taskId}/reassign`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify(payload)})
+    if (res.ok){
+      toast.success('Task reassigned')
+      const tres = await fetch(`/api/projects/${id}/tasks`, {headers:{'Authorization': `Bearer ${token}`}})
+      const td = await tres.json()
+      setTasks(td.tasks||[])
+      setReassignRole('')
+      setReassignTarget('')
+    } else {
+      toast.error('Reassign failed')
+    }
+  }
+
+  const closeTask = async (taskId:number) =>{
+    const token = localStorage.getItem('token')
+    const res = await fetch(`/api/tasks/${taskId}/status`, {method:'POST', headers:{'Authorization': `Bearer ${token}`,'Content-Type':'application/json'}, body: JSON.stringify({status: 'Closed'})})
+    if (res.ok){
+      toast.success('Task closed')
+      const tres = await fetch(`/api/projects/${id}/tasks`, {headers:{'Authorization': `Bearer ${token}`}})
+      const td = await tres.json()
+      setTasks(td.tasks||[])
+    } else {
+      toast.error('Close failed')
+    }
+  }
+
+  if (!project) return <div>Loading...</div>
+  return (
+    <div style={{padding:20}}>
+      <h1>{project.project_name}</h1>
+      <div>District: {project.district} | State: {project.state}</div>
+      <div>Type: {project.project_type}</div>
+
+      <h3>Intervention Simulator</h3>
+      <div style={{display:'flex', gap:12}}>
+        <div>
+          <label>Pending approvals: {pendingApprovals}</label>
+          <input type="range" min={0} max={10} value={pendingApprovals} onChange={e=>setPendingApprovals(parseInt(e.target.value))} />
+        </div>
+        <div>
+          <label>Compensation pending %: {compPendingPct}</label>
+          <input type="range" min={0} max={100} value={compPendingPct} onChange={e=>setCompPendingPct(parseInt(e.target.value))} />
+        </div>
+        <div>
+          <label>Possession %: {possessionPct}</label>
+          <input type="range" min={0} max={100} value={possessionPct} onChange={e=>setPossessionPct(parseInt(e.target.value))} />
+        </div>
+        <div>
+          <label>Legal dispute:</label>
+          <input type="checkbox" checked={legalDispute} onChange={e=>setLegalDispute(e.target.checked)} />
+        </div>
+      </div>
+      <button onClick={runIntervention}>Run Simulation</button>
+
+      {beforeAfter && (
+        <div>
+          <h4>Before</h4>
+          <pre>{JSON.stringify(beforeAfter.before, null, 2)}</pre>
+          <h4>After</h4>
+          <pre>{JSON.stringify(beforeAfter.after, null, 2)}</pre>
+          <div>Delta score: {beforeAfter.delta_score}</div>
+        </div>
+      )}
+
+      <h3>SHAP Explanation</h3>
+      {enhanced && (
+        <div>
+          <img src={enhanced.chart_base64} alt="SHAP chart" style={{maxWidth:'100%', border:'1px solid #ddd'}} />
+          <h4>Top Contributors</h4>
+          <div style={{display:'flex',gap:12}}>
+            <div>
+              <h5>Positive (increase risk)</h5>
+              <ul>
+                {(enhanced.top_positive_contributors||[]).map((c:any,i:number)=>(<li key={i}>{c.feature}: {c.contribution.toFixed(3)}</li>))}
+              </ul>
+            </div>
+            <div>
+              <h5>Negative (protective)</h5>
+              <ul>
+                {(enhanced.top_negative_contributors||[]).map((c:any,i:number)=>(<li key={i}>{c.feature}: {c.contribution.toFixed(3)}</li>))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <h3>Tasks</h3>
+      <div style={{marginBottom:8}}>
+        <label>Assign to user (superadmin only):</label>
+        <select onChange={e=>setAssignUser(e.target.value)} value={assignUser}>
+          <option value="">-- none --</option>
+          {users.map(u=> (<option key={u.username} value={u.username}>{u.username} ({u.role})</option>))}
+        </select>
+        <button onClick={()=>createTask('Resolve pending approvals', assignUser)}>Create Task: Resolve pending approvals</button>
+      </div>
+      <div>
+        {tasks.map(t=> (
+          <div key={t.id} style={{border:'1px solid #eee', padding:8, margin:8}}>
+            <div><strong>{t.title}</strong> [{t.status}]</div>
+            <div>Assigned: {t.assigned_user || t.assigned_role} | Due: {t.due_date}</div>
+
+            <div style={{marginTop:8}}>
+              <h5>Actions</h5>
+              <div style={{display:'flex', gap:8}}> 
+                {t.assigned_user===null && ( <button onClick={()=>claimTask(t.id)}>Claim task</button> )}
+                <button onClick={()=>{ setReassignRole(t.assigned_role||''); setReassignTarget(t.assigned_user||''); }}>Prepare Reassign</button>
+                <button onClick={()=>closeTask(t.id)}>Close Task</button>
+              </div>
+
+              <div style={{marginTop:8}}>
+                <label>Reassign to role:</label>
+                <select onChange={e=>setReassignRole(e.target.value)} value={reassignRole}>
+                  <option value="">-- none --</option>
+                  <option value="project_officer">project_officer</option>
+                  <option value="district_officer">district_officer</option>
+                  <option value="state_admin">state_admin</option>
+                  <option value="superadmin">superadmin</option>
+                </select>
+                <label style={{marginLeft:8}}>Or user:</label>
+                <select onChange={e=>setReassignTarget(e.target.value)} value={reassignTarget}>
+                  <option value="">-- none --</option>
+                  {users.map(u=> (<option key={u.username} value={u.username}>{u.username} ({u.role})</option>))}
+                </select>
+                <button onClick={()=>reassignTask(t.id)}>Confirm Reassign</button>
+              </div>
+            </div>
+
+            <div style={{marginTop:8}}>
+              <h5>Comments</h5>
+              <input value={commentText} onChange={e=>setCommentText(e.target.value)} placeholder="Add a comment..." />
+              <button onClick={()=>addComment(t.id)}>Add Comment</button>
+            </div>
+
+            <div style={{marginTop:8}}>
+              <h5>Attachments</h5>
+              <input type="file" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} />
+              <button onClick={()=>uploadAttachment(t.id)}>Upload</button>
+            </div>
+
+          </div>
+        ))}
+      </div>
+
+    </div>
+  )
+}

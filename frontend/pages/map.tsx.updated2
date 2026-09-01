@@ -1,0 +1,96 @@
+import { useEffect, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
+import Supercluster from 'supercluster'
+
+const MapPage = () => {
+  const mapRef = useRef<any>(null)
+  const [mapReady, setMapReady] = useState(false)
+
+  useEffect(()=>{
+    let mapInstance: any
+    let clusterIndex: any
+    async function init(){
+      const maplibregl = (await import('maplibre-gl')).default
+      mapInstance = new maplibregl.Map({
+        container: 'map',
+        style: 'https://demotiles.maplibre.org/style.json',
+        center: [78, 23],
+        zoom: 4
+      })
+      mapRef.current = mapInstance
+
+      const projRes = await fetch('/api/map/projects')
+      const projData = await projRes.json()
+      const points = projData.features.map((f:any)=>({
+        type: 'Feature',
+        geometry: f.geometry,
+        properties: { ...f.properties }
+      }))
+
+      // Build supercluster index
+      clusterIndex = new Supercluster({ radius: 60, maxZoom: 16 })
+      clusterIndex.load(points.map(p=>({
+        type: 'Feature',
+        geometry: p.geometry,
+        properties: p.properties
+      })))
+
+      function renderClusters(){
+        // remove existing markers
+        const existing = document.querySelectorAll('.cluster-marker, .project-marker')
+        existing.forEach((el:any)=>el.remove())
+
+        const bounds = mapInstance.getBounds().toArray().flat()
+        const zoom = Math.round(mapInstance.getZoom())
+        const clusters = clusterIndex.getClusters(bounds, zoom)
+
+        clusters.forEach((c:any)=>{
+          const [lng, lat] = c.geometry.coordinates
+          if (c.properties && c.properties.cluster){
+            const count = c.properties.point_count
+            const el = document.createElement('div')
+            el.className = 'cluster-marker'
+            el.style.width = `${20 + Math.min(count, 200)/200*40}px`
+            el.style.height = el.style.width
+            el.style.background = 'rgba(219,39,119,0.9)'
+            el.style.color = 'white'
+            el.style.display = 'flex'
+            el.style.alignItems = 'center'
+            el.style.justifyContent = 'center'
+            el.style.borderRadius = '50%'
+            el.innerText = String(count)
+            el.style.cursor = 'pointer'
+            el.onclick = ()=>{ mapInstance.easeTo({center:[lng,lat], zoom: Math.min(16, zoom+2)}) }
+            new maplibregl.Marker({element: el}).setLngLat([lng, lat]).addTo(mapInstance)
+          } else {
+            // single project
+            const el = document.createElement('div')
+            el.className = 'project-marker'
+            el.style.width = '12px'
+            el.style.height = '12px'
+            el.style.background = c.properties.delayed ? '#b91c1c' : '#10b981'
+            el.style.borderRadius = '50%'
+            el.style.border = '2px solid white'
+            const popup = new maplibregl.Popup({offset: 10}).setText(c.properties.project_name)
+            new maplibregl.Marker({element: el}).setLngLat([lng, lat]).setPopup(popup).addTo(mapInstance)
+          }
+        })
+      }
+
+      mapInstance.on('moveend', renderClusters)
+      renderClusters()
+      setMapReady(true)
+    }
+    init()
+    return ()=>{ if (mapInstance) mapInstance.remove() }
+  },[])
+
+  return (
+    <div className="container">
+      <h2 className="text-xl font-semibold py-4">Risk Map (Demo)</h2>
+      <div id="map" style={{width:'100%', height:'80vh'}}></div>
+    </div>
+  )
+}
+
+export default MapPage
